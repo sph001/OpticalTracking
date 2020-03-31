@@ -1,16 +1,17 @@
 import calibration.Mono as cc
 import calibration.Stereo as sc
+import cv2
+import numpy as np
 import os
 from sys import argv
 _, leftFolder, rightFolder = argv
 
 baseDir = os.getcwd()
-left = cc.CameraCalibration(baseDir, leftFolder)
-right = cc.CameraCalibration(baseDir, rightFolder)
-
+left = cc.CameraCalibration.load(leftFolder)
+right = cc.CameraCalibration.load(rightFolder)
 stereoCalib = sc.StereoCalibration(left, right)
+print("calibration started")
 stereoCalib.calibrate()
-print("calibration Complete")
-stereoCalib.save(baseDir + "\\calibration")
-print("done")
-exit()
+print("\tdone")
+stereoCalib.save()
+

@@ -1,6 +1,8 @@
 import cv2
 import numpy as np
-from calibration.Mono import CameraCalibration as calibration
+from calibration.Mono import CameraCalibration
+import Utilities.CalibrationStoreage as calibrationStorage
+from operator import attrgetter
 
 
 class StereoCalibration:
@@ -8,17 +10,32 @@ class StereoCalibration:
     Translation = []
     Essential = []
     Fundamental = []
+    OutputDirectory = "Calibration"
+    Left = None
+    Right = None
+    StoredNPArrays = ["Rotation", "Translation",
+                      "Essential", "Fundamental"]
+    StoredConfig = ["Left-OutputDirectory", "Right-OutputDirectory"]
 
-    def __init__(self, left: calibration, right: calibration):
+    @staticmethod
+    def load(folder) -> 'StereoCalibration':
+        sc = StereoCalibration(calibrationStorage.Complex, calibrationStorage.Complex)
+        calibrationStorage.load(folder, sc)
+        sc.Left = CameraCalibration.load(sc.Left.OutputDirectory)
+        sc.Right = CameraCalibration.load(sc.Right.OutputDirectory)
+        return sc
+
+    def save(self):
+        calibrationStorage.save(self)
+        calibrationStorage.save(self.Left)
+        calibrationStorage.save(self.Right)
+
+    def __init__(self, left: CameraCalibration or calibrationStorage.Complex, right: CameraCalibration or calibrationStorage.Complex):
         self.Left = left
-        self.Left.load_calibration()
         self.Right = right
-        self.Right.load_calibration()
 
-    def sync_datasets(self):
+    def sync_data_sets(self):
         '''used to make sure that both cameras are calibrating off the same set of frames'''
-        if len(self.Left.Manifest) == len(self.Right.Manifest):
-            return
         lc = 0
         rc = 0
         lToDrop = []
@@ -38,30 +55,20 @@ class StereoCalibration:
         self.Right.remove_indexes(rToDrop)
 
     def calibrate(self):
-        self.sync_datasets()
+        self.sync_data_sets()
 
-        ret, lcm, ldc, rcm, rdc, r, t, e, f = cv2.stereoCalibrate(self.Left.ObjectPoints, self.Left.ImagePoints, self.Right.ImagePoints, (720, 576), None, None, None, None)
+        ret, lcm, ldc, rcm, rdc, r, t, e, f = cv2.stereoCalibrate(self.Left.ObjectPoints, self.Left.ImagePoints,
+                                                                  self.Right.ImagePoints,
+                                                                  self.Left.CameraMatrix, self.Left.DistortionCoefficients,
+                                                                  self.Right.CameraMatrix, self.Right.DistortionCoefficients,
+                                                                  self.Left.FrameSize)
         if ret:
             self.Left.CameraMatrix = lcm
-            self.Left.DistanceCoefficients = ldc
+            self.Left.DistortionCoefficients = ldc
             self.Right.CameraMatrix = rcm
-            self.Right.DistanceCoefficients = ldc
+            self.Right.DistortionCoefficients = ldc
             self.Rotation = r
             self.Translation = t
             self.Essential = e
             self.Fundamental = f
-
-    def load(self, folder):
-        self.Rotation = np.load(folder+"\\StereoRotation.npy")
-        self.Translation = np.load(folder+"\\StereoTranslation")
-        self.Essential = np.load(folder+"\\StereoEssential")
-        self.Fundamental = np.load(folder+"\\StereoFundamental")
-
-    def save(self, output):
-        self.Left.save()
-        self.Right.save()
-        np.save(output+"\\StereoRotation", self.Rotation)
-        np.save(output+"\\StereoTranslation", self.Translation)
-        np.save(output+"\\StereoEssential", self.Essential)
-        np.save(output+"\\StereoFundamental", self.Fundamental)
 

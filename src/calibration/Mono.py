@@ -1,34 +1,49 @@
+from typing import Tuple
+import Utilities.CalibrationStoreage as calibrationStorage
 import numpy as np
 import cv2
 import os
 
 
 class CameraCalibration:
-    Manifest = []
-    ObjectPoints = []
-    ImagePoints = []
-    CameraMatrix = []
-    DistortionCoefficients = []
-    RotationVectors = []
-    TranslationVectors = []
-    frameSize = (-1, -1)
-    Directory = ""
-    FileName = ""
-    OutputDirectory = ""
+    Manifest: [] = []
+    Criteria = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 30, 0.001)
+    Flags = cv2.CALIB_FIX_K4 | cv2.CALIB_FIX_K5 | cv2.CALIB_FIX_K6
+    ObjectPoints: [] = []
+    ImagePoints: [] = []
+    CameraMatrix: np.ndarray = np.ndarray([])
+    DistortionCoefficients: np.ndarray = np.ndarray([])
+    RotationVectors: np.ndarray = np.ndarray([])
+    TranslationVectors: np.ndarray = np.ndarray([])
+    FrameSize: Tuple[int, int] = (-1, -1)
+    FileName: str = ""
+    OutputDirectory: str = ""
+    StoredNPArrays = ["Manifest", "ObjectPoints", "ImagePoints", "CameraMatrix",
+                        "DistortionCoefficients", "RotationVectors", "TranslationVectors"]
+    StoredConfig = ["FileName", "OutputDirectory", "FrameSize"]
 
-    def __init__(self, directory, filename):
-        filename = filename.replace(".\\Calibration\\", "\\")
-        self.Directory = directory + "\\"
+    def __init__(self, filename):
         self.FileName = filename
-        self.OutputDirectory = self.Directory + "Calibration\\" + filename.replace(".avi", "")
-        self.Criteria = (cv2.TermCriteria_EPS + cv2.TermCriteria_MAX_ITER, 30, 0.001)
+        self.OutputDirectory = os.path.join("Calibration", os.path.basename(filename.replace(".avi", "")))
+
+    @staticmethod
+    def load(folder):
+        mc = CameraCalibration("")
+        calibrationStorage.load(folder, mc)
+        return mc
+
+    def save(self):
+        calibrationStorage.save(self)
 
     def detect_chessboard(self, board_size, skip_interval=1):
-        frame_output = self.OutputDirectory + "\\Frames"
+        self.Manifest = []
+        self.ObjectPoints = []
+        self.ImagePoints = []
+        frame_output = os.path.join(self.OutputDirectory, "Frames")
         video = cv2.VideoCapture(self.FileName)
         obj_points = np.zeros((board_size[0] * board_size[1], 3), np.float32)
         obj_points[:, :2] = np.mgrid[0:board_size[1] * 3:3, 0:board_size[0] * 3:3].T.reshape(-1, 2)
-        self.frameSize = (int(video.get(cv2.CAP_PROP_FRAME_WIDTH)), int(video.get(cv2.CAP_PROP_FRAME_HEIGHT)))
+        self.FrameSize = (int(video.get(cv2.CAP_PROP_FRAME_WIDTH)), int(video.get(cv2.CAP_PROP_FRAME_HEIGHT)))
         if not os.path.exists(self.OutputDirectory):
             os.mkdir(self.OutputDirectory)
         if not os.path.exists(frame_output):
@@ -36,24 +51,26 @@ class CameraCalibration:
         count = 0
         print("detecting chessboard")
         while True:
-            count += 1
+            count += skip_interval
+            video.set(cv2.CAP_PROP_POS_FRAMES, count)
             ret, frame = video.read()
             if not ret:
                 break
-            if count % skip_interval == 0:
-                gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-                ret, corners = cv2.findChessboardCorners(gray, board_size, None)
-                if ret:
-                    np.append(self.Manifest, count)
-                    cv2.imwrite(frame_output + "\\frame_" + str(count) + ".png", frame)
-                    np.append(self.ObjectPoints, obj_points)
-                    corners2 = cv2.cornerSubPix(gray, corners, (3, 3), (-1, -1), self.Criteria)
-                    np.append(self.ImagePoints, corners2)
+            gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+            ret, corners = cv2.findChessboardCorners(gray, board_size)
+            if ret:
+                self.Manifest.append(count)
+                cv2.imwrite(os.path.join(frame_output, "frame_" + str(count) + ".png"), frame)
+                self.ObjectPoints.append(obj_points)
+                corners2 = cv2.cornerSubPix(gray, corners, (3, 3), (-1, -1), self.Criteria)
+                self.ImagePoints.append(corners2)
         print("\tdone")
 
     def calibrate(self):
         print("calculating calibration")
-        ret, mtx, dist, rvecs, tvecs = cv2.calibrateCamera(self.ObjectPoints, self.ImagePoints, self.frameSize, None, None)
+        print("Number of frames: " + str(len(self.Manifest)))
+        ret, mtx, dist, rvecs, tvecs = cv2.calibrateCamera(self.ObjectPoints, self.ImagePoints, self.FrameSize,
+                                                           None, None)
         print("\tdone")
         if ret:
             self.CameraMatrix = mtx
@@ -61,26 +78,10 @@ class CameraCalibration:
             self.RotationVectors = rvecs
             self.TranslationVectors = rvecs
 
-    def load_calibration(self):
-        self.Manifest = self.load_file(self.OutputDirectory, "Manifest")
-        self.ObjectPoints = self.load_file(self.OutputDirectory, "ObjectPoints")
-        self.ImagePoints = self.load_file(self.OutputDirectory, "ImagePoints")
-
     def remove_indexes(self, indexes: []):
         self.Manifest = np.delete(self.Manifest, indexes, 0)
         self.ObjectPoints = np.delete(self.ObjectPoints, indexes, 0)
         self.ImagePoints = np.delete(self.ImagePoints, indexes, 0)
 
-    def save(self):
-        np.save(self.OutputDirectory + "\\ObjectPoints", self.ObjectPoints)
-        np.save(self.OutputDirectory + "\\ImagePoints", self.ImagePoints)
-        np.save(self.OutputDirectory + "\\Manifest", self.Manifest)
-        np.save(self.OutputDirectory + "\\CameraMatrix", self.CameraMatrix)
-        np.save(self.OutputDirectory + "\\DistortionCoefficients", self.DistortionCoefficients)
-        np.save(self.OutputDirectory + "\\RotationVectors", self.RotationVectors)
-        np.save(self.OutputDirectory + "\\TranslationVectors", self.TranslationVectors)
 
-    @staticmethod
-    def load_file(directory, name) -> np.ndarray:
-        file = directory + "\\" + name + ".npy"
-        return np.load(file)
+
